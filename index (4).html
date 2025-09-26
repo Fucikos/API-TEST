@@ -1,0 +1,137 @@
+<!--
+Simple single-file demo: "torn-player-name.html"
+
+What it does:
+- Asks user for their Torn public API key
+- Attempts to fetch the player data from Torn API and display the player's name
+
+Notes / caveats:
+- Some browsers may block direct requests to the Torn API because of CORS. If you see a CORS error in the console, run a tiny server-side proxy (example Node/Express proxy below) or host this HTML on a server that can proxy the request.
+- Do NOT paste your private API keys into public pages. A Torn "public key" that you expect users to share should be ok to paste for testing, but encourage users to trust the site first.
+
+Example Node.js proxy (save as proxy.js) to avoid CORS and hide your server-side API calls:
+
+const express = require('express');
+const fetch = require('node-fetch');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/torn-proxy', async (req, res) => {
+  const { key } = req.query;
+  if (!key) return res.status(400).json({ error: 'missing key' });
+  try {
+    const url = `https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(key)}&format=json`;
+    const r = await fetch(url);
+    const data = await r.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(PORT, () => console.log(`Proxy listening on ${PORT}`));
+
+Usage: https://yourserver.example/torn-proxy?key=USER_API_KEY
+
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Torn — Show player name</title>
+  <style>
+    body{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding:24px; background:#f7f7fb}
+    .card{background:white;padding:20px;border-radius:10px;box-shadow:0 6px 20px rgba(20,20,50,0.06);max-width:560px;margin:40px auto}
+    label{display:block;margin-bottom:8px;font-weight:600}
+    input[type=text]{width:100%;padding:10px;border-radius:8px;border:1px solid #e6e8f0}
+    button{margin-top:12px;padding:10px 14px;border-radius:8px;border:none;background:#2563eb;color:white;font-weight:600;cursor:pointer}
+    .result{margin-top:16px;padding:12px;border-radius:8px;background:#f1f5ff}
+    .error{color:#b91c1c}
+    small{color:#475569}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Show Torn player name</h2>
+    <p>Enter your Torn public API key and click <em>Lookup</em>. The site will attempt to fetch your player data and display your in-game name.</p>
+
+    <label for="apiKey">Torn API key</label>
+    <input id="apiKey" type="text" placeholder="Enter Torn API key (e.g. abcdef123456)" />
+
+    <label for="proxy">Optional: Proxy URL</label>
+    <input id="proxy" type="text" placeholder="Optional proxy (e.g. https://myserver.example/torn-proxy)" />
+    <small>If you leave Proxy blank the page will try to call Torn API directly and may be blocked by CORS. Use a proxy if you see CORS errors.</small>
+
+    <div>
+      <button id="lookupBtn">Lookup</button>
+    </div>
+
+    <div id="output" class="result" style="display:none"></div>
+  </div>
+
+  <script>
+    const lookupBtn = document.getElementById('lookupBtn');
+    const apiKeyInput = document.getElementById('apiKey');
+    const proxyInput = document.getElementById('proxy');
+    const output = document.getElementById('output');
+
+    function show(msg, isError=false) {
+      output.style.display = 'block';
+      output.innerHTML = isError ? `<div class="error">${escapeHtml(msg)}</div>` : escapeHtml(msg);
+    }
+
+    function escapeHtml(unsafe) {
+      return String(unsafe)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    lookupBtn.addEventListener('click', async () => {
+      const key = apiKeyInput.value.trim();
+      const proxy = proxyInput.value.trim();
+      if (!key) { show('Please enter an API key.', true); return; }
+
+      show('Looking up...');
+
+      // Build URL. If a proxy is provided, call the proxy with ?key=...
+      // Otherwise call Torn API directly (may be blocked by CORS).
+      const tornUrl = `https://api.torn.com/user/?selections=basic&key=${encodeURIComponent(key)}&format=json`;
+      const url = proxy ? `${proxy}?key=${encodeURIComponent(key)}` : tornUrl;
+
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          let txt = await res.text();
+          throw new Error(`HTTP ${res.status} ${res.statusText} - ${txt}`);
+        }
+        const data = await res.json();
+
+        // Torn API returns an "error" property if the key is invalid or rate-limited
+        if (data.error) {
+          show(`API error: ${data.error}` , true);
+          return;
+        }
+
+        // data.name usually contains the player's name
+        const name = data.name || (data.player && data.player.name) || 'Unknown';
+        show(`<strong>Player name:</strong> ${escapeHtml(name)}<br><small>Full response:</small><pre style="white-space:pre-wrap">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`);
+
+      } catch (err) {
+        // Common issue: CORS blocked the request. Provide guidance.
+        const msg = err.message || String(err);
+        if (/cors/i.test(msg) || /blocked/i.test(msg) || /failed to fetch/i.test(msg)) {
+          show(`Network/CORS error. The browser may be blocking direct calls to the Torn API. Try using a server-side proxy.\n\n(Proxy example included at the top of the HTML file.)`, true);
+        } else {
+          show(`Fetch error: ${msg}`, true);
+        }
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>
